@@ -1,0 +1,13 @@
+flask==3.0.3
+flask-cors==4.0.1
+python-dotenv==1.0.1
+psycopg[binary]==3.2.1
+spacy==3.7.5
+pdfminer.six==20231228
+python-docx==1.1.2
+beautifulsoup4==4.12.3
+lxml==5.2.2
+selenium==4.23.1
+webdriver-manager==4.0.2
+requests==2.32.3
+Faker==28.4.1
