@@ -18,6 +18,8 @@ import {
 	ChevronRight,
 	Filter,
 	ArrowUpDown,
+	Github,
+	Linkedin,
 } from 'lucide-react';
 
 interface Job {
@@ -338,6 +340,12 @@ export default function Home() {
 		setCurrentMatchedPage(1); // Reset to first page
 	};
 
+	// Function to get unique companies for display
+	const getUniqueCompanies = (jobs: Job[], count: number = 3): string[] => {
+		const uniqueCompanies = [...new Set(jobs.map((job) => job.company))];
+		return uniqueCompanies.slice(0, count);
+	};
+
 	const resetAnalysis = () => {
 		setUploadedFile(null);
 		setExtractedKeywords(null);
@@ -351,7 +359,7 @@ export default function Home() {
 	};
 
 	return (
-		<div className='min-h-screen bg-background'>
+		<div className='min-h-screen bg-background flex flex-col'>
 			{/* Header */}
 			<header className='border-b border-border'>
 				<div className='container mx-auto px-4 py-6'>
@@ -365,7 +373,7 @@ export default function Home() {
 				</div>
 			</header>
 
-			<main className='container mx-auto px-4 py-8'>
+			<main className='container mx-auto px-4 py-8 flex-1'>
 				<div className='max-w-4xl mx-auto space-y-8'>
 					{/* Hero Section */}
 					<div className='text-center space-y-4'>
@@ -389,12 +397,7 @@ export default function Home() {
 							<div className='bg-green-500/10 border border-green-500/20 rounded-lg p-4 max-w-2xl mx-auto'>
 								<p className='text-sm text-green-200'>
 									<strong>Real Internship Data:</strong> We have {totalJobs} live internship opportunities in our
-									database. Including positions from companies like{' '}
-									{availableJobs
-										.slice(0, 3)
-										.map((job) => job.company)
-										.join(', ')}
-									.
+									database. Including positions from companies like {getUniqueCompanies(availableJobs, 3).join(', ')}.
 								</p>
 							</div>
 						)}
@@ -856,6 +859,41 @@ export default function Home() {
 					)}
 				</div>
 			</main>
+
+			{/* Footer */}
+			<footer className='border-t border-border bg-muted/30'>
+				<div className='container mx-auto px-4 py-8'>
+					<div className='flex flex-col items-center space-y-4'>
+						<div className='flex items-center space-x-2'>
+							<Briefcase className='h-6 w-6 text-primary' />
+							<span className='text-lg font-semibold text-foreground'>InternMatch</span>
+						</div>
+						<p className='text-sm text-muted-foreground text-center'>
+							Built by <span className='font-medium text-foreground'>Ousmane Barry</span>
+						</p>
+						<div className='flex items-center space-x-4'>
+							<a
+								href='https://github.com/ousmanebarry/'
+								target='_blank'
+								rel='noopener noreferrer'
+								className='flex items-center space-x-2 text-muted-foreground hover:text-foreground transition-colors'
+							>
+								<Github className='h-5 w-5' />
+								<span className='text-sm'>GitHub</span>
+							</a>
+							<a
+								href='https://linkedin.com/in/barry-ousmane/'
+								target='_blank'
+								rel='noopener noreferrer'
+								className='flex items-center space-x-2 text-muted-foreground hover:text-foreground transition-colors'
+							>
+								<Linkedin className='h-5 w-5' />
+								<span className='text-sm'>LinkedIn</span>
+							</a>
+						</div>
+					</div>
+				</div>
+			</footer>
 		</div>
 	);
 }

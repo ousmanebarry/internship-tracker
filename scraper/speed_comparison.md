@@ -99,3 +99,4 @@ python stats.py
 - Still includes anti-detection measures (random user agents, etc.)
 
 The fast scraper maintains anti-detection measures while significantly improving speed through parallelization and optimization.
+

@@ -379,3 +379,4 @@ if __name__ == "__main__":
         scraper.scrape_all_fast()
     finally:
         scraper.close()
+
