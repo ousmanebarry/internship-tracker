@@ -51,117 +51,11 @@ interface ExtractedKeywords {
 	totalKeywords: number;
 }
 
-// Common technical skills and technologies for keyword extraction
-const TECHNICAL_SKILLS = [
-	'JavaScript',
-	'TypeScript',
-	'Python',
-	'Java',
-	'C++',
-	'C#',
-	'Go',
-	'Rust',
-	'PHP',
-	'Ruby',
-	'React',
-	'Vue',
-	'Angular',
-	'Node.js',
-	'Express',
-	'Next.js',
-	'Nuxt.js',
-	'Svelte',
-	'HTML',
-	'CSS',
-	'SCSS',
-	'Sass',
-	'Tailwind',
-	'Bootstrap',
-	'Material-UI',
-	'SQL',
-	'MySQL',
-	'PostgreSQL',
-	'MongoDB',
-	'Redis',
-	'Firebase',
-	'Supabase',
-	'AWS',
-	'Azure',
-	'Google Cloud',
-	'Docker',
-	'Kubernetes',
-	'Jenkins',
-	'GitHub Actions',
-	'Git',
-	'GitHub',
-	'GitLab',
-	'Bitbucket',
-	'Jira',
-	'Confluence',
-	'Figma',
-	'Adobe XD',
-	'REST API',
-	'GraphQL',
-	'Microservices',
-	'CI/CD',
-	'DevOps',
-	'Agile',
-	'Scrum',
-	'Machine Learning',
-	'AI',
-	'Data Science',
-	'Pandas',
-	'NumPy',
-	'TensorFlow',
-	'PyTorch',
-	'Mobile Development',
-	'React Native',
-	'Flutter',
-	'iOS',
-	'Android',
-	'Swift',
-	'Kotlin',
-	'Web Development',
-	'Frontend',
-	'Backend',
-	'Full Stack',
-	'Software Engineering',
-	'Problem Solving',
-	'Communication',
-	'Leadership',
-	'Teamwork',
-	'Project Management',
-];
-
-const EXPERIENCE_KEYWORDS = [
-	'Intern',
-	'Internship',
-	'Experience',
-	'Projects',
-	'Portfolio',
-	'GitHub',
-	'Frontend Development',
-	'Backend Development',
-	'Full Stack Development',
-	'Web Development',
-	'Mobile Development',
-	'Software Development',
-	'Data Analysis',
-	'Machine Learning',
-	'AI Development',
-	'DevOps',
-	'UI/UX Design',
-	'Product Management',
-	'Quality Assurance',
-	'Testing',
-];
-
 export default function Home() {
 	const [uploadedFile, setUploadedFile] = useState<File | null>(null);
 	const [isAnalyzing, setIsAnalyzing] = useState(false);
 	const [analysisProgress, setAnalysisProgress] = useState(0);
 	const [extractedKeywords, setExtractedKeywords] = useState<ExtractedKeywords | null>(null);
-	const [extractedText, setExtractedText] = useState<string>('');
 	const [matchedJobs, setMatchedJobs] = useState<Job[]>([]);
 	const [analysisError, setAnalysisError] = useState<string | null>(null);
 
@@ -182,7 +76,19 @@ export default function Home() {
 	const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
 	// Function to fetch internships from the database with pagination
-	const fetchInternships = async (page: number = 1): Promise<{ jobs: Job[]; pagination: any }> => {
+	const fetchInternships = async (
+		page: number = 1
+	): Promise<{
+		jobs: Job[];
+		pagination: {
+			currentPage: number;
+			totalPages: number;
+			totalCount: number;
+			limit: number;
+			hasNextPage: boolean;
+			hasPrevPage: boolean;
+		};
+	}> => {
 		try {
 			const response = await fetch(`/api/internships?page=${page}&limit=50&active=true`);
 			const data = await response.json();
@@ -253,7 +159,7 @@ export default function Home() {
 	}, [sortBy, sortOrder, allMatchedJobs, currentMatchedPage, matchedJobsPerPage]);
 
 	// Function to analyze PDF using the API
-	const analyzePDFWithAPI = async (file: File): Promise<{ text: string; keywords: any }> => {
+	const analyzePDFWithAPI = async (file: File): Promise<{ text: string; keywords: ExtractedKeywords }> => {
 		const formData = new FormData();
 		formData.append('file', file);
 
@@ -329,7 +235,6 @@ export default function Home() {
 
 			setAnalysisProgress(80);
 			setExtractedKeywords(keywords);
-			setExtractedText(extractedText);
 
 			// Debug: Log extracted text length
 			console.log('Extracted text length:', extractedText.length);
@@ -346,14 +251,14 @@ export default function Home() {
 
 				// Get all extracted keywords
 				const allExtracted = [
-					...keywords.programmingLanguages.map((s: any) => s.toLowerCase()),
-					...keywords.frameworksAndLibraries.map((s: any) => s.toLowerCase()),
-					...keywords.databases.map((s: any) => s.toLowerCase()),
-					...keywords.cloudAndInfrastructure.map((s: any) => s.toLowerCase()),
-					...keywords.toolsAndPlatforms.map((s: any) => s.toLowerCase()),
-					...keywords.mobileAndWeb.map((s: any) => s.toLowerCase()),
-					...keywords.testingAndQA.map((s: any) => s.toLowerCase()),
-					...keywords.softSkills.map((s: any) => s.toLowerCase()),
+					...keywords.programmingLanguages.map((s: string) => s.toLowerCase()),
+					...keywords.frameworksAndLibraries.map((s: string) => s.toLowerCase()),
+					...keywords.databases.map((s: string) => s.toLowerCase()),
+					...keywords.cloudAndInfrastructure.map((s: string) => s.toLowerCase()),
+					...keywords.toolsAndPlatforms.map((s: string) => s.toLowerCase()),
+					...keywords.mobileAndWeb.map((s: string) => s.toLowerCase()),
+					...keywords.testingAndQA.map((s: string) => s.toLowerCase()),
+					...keywords.softSkills.map((s: string) => s.toLowerCase()),
 				];
 
 				const matches = jobKeywords.filter((jk) => allExtracted.some((ek) => ek.includes(jk) || jk.includes(ek)));
@@ -436,7 +341,6 @@ export default function Home() {
 	const resetAnalysis = () => {
 		setUploadedFile(null);
 		setExtractedKeywords(null);
-		setExtractedText('');
 		setMatchedJobs([]);
 		setAllMatchedJobs([]);
 		setCurrentMatchedPage(1);
@@ -879,8 +783,8 @@ export default function Home() {
 										<AlertCircle className='h-12 w-12 text-muted-foreground mx-auto mb-4' />
 										<h3 className='text-lg font-medium text-foreground mb-2'>No Matching Jobs Found</h3>
 										<p className='text-muted-foreground'>
-											We couldn't find any internships that match your current skills. Consider updating your resume
-											with more relevant technical skills or experience.
+											We couldn&apos;t find any internships that match your current skills. Consider updating your
+											resume with more relevant technical skills or experience.
 										</p>
 									</CardContent>
 								</Card>

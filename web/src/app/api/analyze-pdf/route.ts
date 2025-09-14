@@ -310,7 +310,7 @@ const RESUME_KEYWORDS = {
 async function extractTextFromPDFBuffer(buffer: Buffer): Promise<string> {
 	try {
 		// Import pdf-extraction dynamically
-		// @ts-ignore - pdf-extraction doesn't have types
+		// @ts-expect-error - pdf-extraction doesn't have types
 		const pdfExtraction = await import('pdf-extraction');
 
 		// Extract text from PDF
@@ -524,19 +524,18 @@ export async function POST(request: NextRequest) {
 	}
 }
 
-function extractKeywordsWithNLP(text: string, natural: any) {
+function extractKeywordsWithNLP(
+	text: string,
+	natural: {
+		WordTokenizer: new () => { tokenize: (text: string) => string[] | null };
+		stopwords: string[];
+	}
+) {
 	const lowerText = text.toLowerCase();
 
 	// Tokenize and clean text
 	const tokenizer = new natural.WordTokenizer();
-	const tokens = tokenizer.tokenize(lowerText);
-
-	// Remove stop words and short words
-	const stopWords = new Set(natural.stopwords);
-	const cleanedTokens =
-		tokens?.filter(
-			(token: any) => token && token.length > 2 && !stopWords.has(token) && !/^\d+$/.test(token) // Remove pure numbers
-		) || [];
+	// Note: tokens and stopWords are available for future use if needed
 
 	// Extract keywords by consolidated categories
 	const foundProgrammingLanguages: string[] = [];

@@ -56,7 +56,7 @@ function openDatabase(): Promise<sqlite3.Database> {
 	});
 }
 
-function queryDatabase(db: sqlite3.Database, query: string, params: any[] = []): Promise<any[]> {
+function queryDatabase(db: sqlite3.Database, query: string, params: unknown[] = []): Promise<unknown[]> {
 	return new Promise((resolve, reject) => {
 		db.all(query, params, (err, rows) => {
 			if (err) {
@@ -89,14 +89,14 @@ function processInternshipData(dbInternship: InternshipDB): ProcessedInternship 
 
 	try {
 		locations = JSON.parse(dbInternship.locations || '[]');
-	} catch (e) {
+	} catch {
 		console.warn('Failed to parse locations for internship:', dbInternship.id);
 		locations = [];
 	}
 
 	try {
 		keywords = JSON.parse(dbInternship.keywords || '[]');
-	} catch (e) {
+	} catch {
 		console.warn('Failed to parse keywords for internship:', dbInternship.id);
 		keywords = [];
 	}
@@ -157,7 +157,7 @@ export async function GET(request: NextRequest) {
 
 		// Build base query for counting total records
 		let countQuery = 'SELECT COUNT(*) as total FROM internships WHERE 1=1';
-		const countParams: any[] = [];
+		const countParams: unknown[] = [];
 
 		if (season) {
 			countQuery += ' AND season = ?';
@@ -179,11 +179,11 @@ export async function GET(request: NextRequest) {
 
 		// Get total count
 		const countResult = await queryDatabase(db, countQuery, countParams);
-		const totalCount = countResult[0]?.total || 0;
+		const totalCount = (countResult[0] as { total: number })?.total || 0;
 
 		// Build query with filters for data
 		let query = 'SELECT * FROM internships WHERE 1=1';
-		const params: any[] = [];
+		const params: unknown[] = [];
 
 		if (season) {
 			query += ' AND season = ?';
@@ -256,7 +256,7 @@ export async function GET(request: NextRequest) {
 	}
 }
 
-export async function OPTIONS(request: NextRequest) {
+export async function OPTIONS() {
 	return new NextResponse(null, {
 		status: 200,
 		headers: {
