@@ -1,0 +1,9 @@
+requests
+selenium
+beautifulsoup4
+spacy
+sqlalchemy
+python-dotenv
+fake-useragent
+webdriver-manager
+lxml
