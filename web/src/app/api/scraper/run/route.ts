@@ -21,11 +21,6 @@ interface InternshipData {
 	};
 }
 
-// Interface for database operations
-interface ScraperMetadata {
-	last_run_date: number;
-}
-
 // Database connection helper
 async function getDbClient(): Promise<Client> {
 	const client = new Client({
@@ -376,7 +371,7 @@ export async function GET(request: NextRequest) {
 }
 
 // Allow manual trigger via POST for testing
-export async function POST(request: NextRequest) {
+export async function POST() {
 	try {
 		console.log('Manual scraper trigger...');
 		const result = await runScraper();

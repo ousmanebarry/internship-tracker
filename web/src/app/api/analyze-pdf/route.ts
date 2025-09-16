@@ -533,9 +533,7 @@ function extractKeywordsWithNLP(
 ) {
 	const lowerText = text.toLowerCase();
 
-	// Tokenize and clean text
-	const tokenizer = new natural.WordTokenizer();
-	// Note: tokens and stopWords are available for future use if needed
+	// Note: Tokenization available if needed in the future with natural.WordTokenizer()
 
 	// Extract keywords by consolidated categories
 	const foundProgrammingLanguages: string[] = [];

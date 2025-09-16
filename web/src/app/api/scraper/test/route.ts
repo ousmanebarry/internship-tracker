@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { Client } from 'pg';
 
 // Simple test endpoint to verify the scraper API is working
 export async function GET(request: NextRequest) {
@@ -47,18 +48,17 @@ export async function POST(request: NextRequest) {
 		const body = await request.json().catch(() => ({}));
 		const testType = body.testType || 'basic';
 
-		let result: any = {
+		const result = {
 			timestamp: new Date().toISOString(),
 			environment: {
 				nodeEnv: process.env.NODE_ENV,
 				hasDatabaseUrl: !!process.env.DATABASE_URL,
 				hasCronSecret: !!process.env.CRON_SECRET,
 			},
-		};
+		} as any;
 
 		if (testType === 'database') {
 			// Test database connection without running full scraper
-			const { Client } = require('pg');
 			const client = new Client({
 				connectionString: process.env.DATABASE_URL,
 				ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
