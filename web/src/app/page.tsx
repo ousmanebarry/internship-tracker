@@ -249,9 +249,9 @@ export default function Home() {
 
 			// Calculate match scores for jobs using ALL internship data
 			const jobsWithScores = allJobs.map((job) => {
-				const jobKeywords = job.keywords.map((k) => k.toLowerCase());
+				const jobKeywords = (job.keywords || []).map((k) => (k || '').toLowerCase());
 
-				// Get all extracted keywords
+				// Get all extracted keywords (lowercased)
 				const allExtracted = [
 					...keywords.programmingLanguages.map((s: string) => s.toLowerCase()),
 					...keywords.frameworksAndLibraries.map((s: string) => s.toLowerCase()),
@@ -263,15 +263,28 @@ export default function Home() {
 					...keywords.softSkills.map((s: string) => s.toLowerCase()),
 				];
 
-				const matches = jobKeywords.filter((jk) => allExtracted.some((ek) => ek.includes(jk) || jk.includes(ek)));
+				let matchScore = 0;
 
-				const matchScore = Math.round((matches.length / jobKeywords.length) * 100);
+				if (jobKeywords.length > 0) {
+					// Keyword-overlap based scoring when job has keywords
+					const matches = jobKeywords.filter((jk) => allExtracted.some((ek) => ek.includes(jk) || jk.includes(ek)));
+					matchScore = Math.round((matches.length / Math.max(1, jobKeywords.length)) * 100);
+				} else {
+					// Fallback: match against job title + description text
+					const jobText = `${job.title || ''} ${job.description || ''}`.toLowerCase();
+					const uniqueExtracted = Array.from(new Set(allExtracted.filter(Boolean)));
+					const hits = uniqueExtracted.filter((ek) => ek.length >= 2 && jobText.includes(ek));
+					matchScore = Math.round((hits.length / Math.max(1, uniqueExtracted.length)) * 100);
+				}
 
 				return { ...job, matchScore };
 			});
 
-			// Filter out jobs with 0% match
-			const filteredJobs = jobsWithScores.filter((job) => job.matchScore > 0);
+			// Filter out jobs with 0% match, but ensure we show top few even if 0 to avoid empty UI
+			let filteredJobs = jobsWithScores.filter((job) => job.matchScore > 0);
+			if (filteredJobs.length === 0) {
+				filteredJobs = jobsWithScores.sort((a, b) => b.matchScore - a.matchScore).slice(0, 10);
+			}
 
 			// Store all matched jobs and reset pagination
 			setAllMatchedJobs(filteredJobs);

@@ -51,19 +51,33 @@ async function getDbClient(): Promise<Client> {
 }
 
 function processInternshipData(dbInternship: InternshipDB): ProcessedInternship {
-	// Parse JSON fields
+	// Parse JSON fields robustly (handle string, array, or object from JSONB)
 	let locations: string[] = [];
 	let keywords: string[] = [];
 
 	try {
-		locations = JSON.parse(dbInternship.locations || '[]');
+		const rawLocations: unknown = (dbInternship as any).locations;
+		if (typeof rawLocations === 'string') {
+			locations = JSON.parse(rawLocations || '[]');
+		} else if (Array.isArray(rawLocations)) {
+			locations = rawLocations as string[];
+		} else if (rawLocations && typeof rawLocations === 'object') {
+			locations = Object.values(rawLocations as Record<string, string>);
+		}
 	} catch {
 		console.warn('Failed to parse locations for internship:', dbInternship.id);
 		locations = [];
 	}
 
 	try {
-		keywords = JSON.parse(dbInternship.keywords || '[]');
+		const rawKeywords: unknown = (dbInternship as any).keywords;
+		if (typeof rawKeywords === 'string') {
+			keywords = JSON.parse(rawKeywords || '[]');
+		} else if (Array.isArray(rawKeywords)) {
+			keywords = rawKeywords as string[];
+		} else if (rawKeywords && typeof rawKeywords === 'object') {
+			keywords = Object.values(rawKeywords as Record<string, string>);
+		}
 	} catch {
 		console.warn('Failed to parse keywords for internship:', dbInternship.id);
 		keywords = [];
