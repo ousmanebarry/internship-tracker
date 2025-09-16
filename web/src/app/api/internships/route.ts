@@ -56,7 +56,11 @@ function processInternshipData(dbInternship: InternshipDB): ProcessedInternship 
 	let keywords: string[] = [];
 
 	try {
-		const rawLocations: unknown = (dbInternship as any).locations;
+		interface MaybeJsonFields {
+			locations?: unknown;
+			keywords?: unknown;
+		}
+		const rawLocations: unknown = (dbInternship as unknown as MaybeJsonFields).locations;
 		if (typeof rawLocations === 'string') {
 			locations = JSON.parse(rawLocations || '[]');
 		} else if (Array.isArray(rawLocations)) {
@@ -70,7 +74,11 @@ function processInternshipData(dbInternship: InternshipDB): ProcessedInternship 
 	}
 
 	try {
-		const rawKeywords: unknown = (dbInternship as any).keywords;
+		interface MaybeJsonFields {
+			locations?: unknown;
+			keywords?: unknown;
+		}
+		const rawKeywords: unknown = (dbInternship as unknown as MaybeJsonFields).keywords;
 		if (typeof rawKeywords === 'string') {
 			keywords = JSON.parse(rawKeywords || '[]');
 		} else if (Array.isArray(rawKeywords)) {
