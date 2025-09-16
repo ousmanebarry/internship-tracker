@@ -62,6 +62,10 @@ export async function POST(request: NextRequest) {
 				currentTime?: string;
 				error?: string;
 			};
+			parsed?: {
+				dbHost?: string;
+				scheme?: string;
+			};
 		} = {
 			timestamp: new Date().toISOString(),
 			environment: {
@@ -70,6 +74,17 @@ export async function POST(request: NextRequest) {
 				hasCronSecret: !!process.env.CRON_SECRET,
 			},
 		};
+
+		// Parse and expose non-sensitive parts of DATABASE_URL for debugging
+		try {
+			if (process.env.DATABASE_URL) {
+				const u = new URL(process.env.DATABASE_URL);
+				result.parsed = {
+					dbHost: u.hostname,
+					scheme: u.protocol.replace(':', ''),
+				};
+			}
+		} catch {}
 
 		if (testType === 'database') {
 			// Test database connection without running full scraper
