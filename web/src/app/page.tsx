@@ -5,6 +5,8 @@ import { useDropzone } from 'react-dropzone';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
 	Upload,
 	FileText,
@@ -77,6 +79,14 @@ export default function Home() {
 	const [sortBy, setSortBy] = useState<'date' | 'match'>('date');
 	const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
+	// State for search filters
+	const [searchCompany, setSearchCompany] = useState<string>('');
+	const [searchRole, setSearchRole] = useState<string>('');
+	const [searchLocation, setSearchLocation] = useState<string>('');
+
+	// State for view mode
+	const [viewMode, setViewMode] = useState<'analysis' | 'browse'>('analysis');
+
 	// Function to fetch internships from the database with pagination
 	const fetchInternships = async (
 		page: number = 1
@@ -126,39 +136,90 @@ export default function Home() {
 		}
 	};
 
-	// Load internships on component mount and when page changes
+	// Load internships on component mount and when page changes (analysis mode only)
 	useEffect(() => {
-		const loadInternships = async () => {
-			setIsLoadingJobs(true);
-			try {
-				const { jobs, pagination } = await fetchInternships(currentPage);
-				setAvailableJobs(jobs);
-				setTotalPages(pagination.totalPages || 1);
-				setTotalJobs(pagination.totalCount || 0);
-			} catch (error) {
-				console.error('Failed to load internships:', error);
-				// Keep empty array if loading fails
-				setAvailableJobs([]);
-				setTotalPages(1);
-				setTotalJobs(0);
-			} finally {
-				setIsLoadingJobs(false);
-			}
-		};
+		if (viewMode === 'analysis') {
+			const loadInternships = async () => {
+				setIsLoadingJobs(true);
+				try {
+					const { jobs, pagination } = await fetchInternships(currentPage);
+					setAvailableJobs(jobs);
+					setTotalPages(pagination.totalPages || 1);
+					setTotalJobs(pagination.totalCount || 0);
+				} catch (error) {
+					console.error('Failed to load internships:', error);
+					// Keep empty array if loading fails
+					setAvailableJobs([]);
+					setTotalPages(1);
+					setTotalJobs(0);
+				} finally {
+					setIsLoadingJobs(false);
+				}
+			};
 
-		loadInternships();
-	}, [currentPage]);
+			loadInternships();
+		}
+	}, [currentPage, viewMode]);
 
-	// Handle sorting changes for matched jobs
+	// Load all internships when switching to browse mode
+	useEffect(() => {
+		if (viewMode === 'browse') {
+			const loadAllInternships = async () => {
+				setIsLoadingJobs(true);
+				try {
+					const allJobs = await fetchAllInternships();
+					setAvailableJobs(allJobs);
+					setTotalPages(Math.ceil(allJobs.length / 50));
+					setTotalJobs(allJobs.length);
+				} catch (error) {
+					console.error('Failed to load all internships:', error);
+					// Keep empty array if loading fails
+					setAvailableJobs([]);
+					setTotalPages(1);
+					setTotalJobs(0);
+				} finally {
+					setIsLoadingJobs(false);
+				}
+			};
+
+			loadAllInternships();
+		}
+	}, [viewMode]);
+
+	// State to track filtered job count for display purposes
+	const [filteredJobsCount, setFilteredJobsCount] = useState<number>(0);
+
+	// Handle sorting changes and search filters for matched jobs
 	useEffect(() => {
 		if (allMatchedJobs.length > 0) {
-			const sortedJobs = sortMatchedJobs(allMatchedJobs, sortBy, sortOrder);
-			const startIndex = (currentMatchedPage - 1) * matchedJobsPerPage;
+			const filteredJobs = applySearchFilters(allMatchedJobs);
+			setFilteredJobsCount(filteredJobs.length);
+
+			// Reset to page 1 if current page is beyond the available pages after filtering
+			const totalPages = Math.ceil(filteredJobs.length / matchedJobsPerPage);
+			const validCurrentPage = currentMatchedPage > totalPages ? 1 : currentMatchedPage;
+
+			const sortedJobs = sortMatchedJobs(filteredJobs, sortBy, sortOrder);
+			const startIndex = (validCurrentPage - 1) * matchedJobsPerPage;
 			const endIndex = startIndex + matchedJobsPerPage;
 			const paginatedJobs = sortedJobs.slice(startIndex, endIndex);
 			setMatchedJobs(paginatedJobs);
+
+			// Update current page if it was reset
+			if (validCurrentPage !== currentMatchedPage) {
+				setCurrentMatchedPage(validCurrentPage);
+			}
 		}
-	}, [sortBy, sortOrder, allMatchedJobs, currentMatchedPage, matchedJobsPerPage]);
+	}, [
+		sortBy,
+		sortOrder,
+		allMatchedJobs,
+		currentMatchedPage,
+		matchedJobsPerPage,
+		searchCompany,
+		searchRole,
+		searchLocation,
+	]);
 
 	// Function to analyze PDF using the API
 	const analyzePDFWithAPI = async (file: File): Promise<{ text: string; keywords: ExtractedKeywords }> => {
@@ -280,18 +341,16 @@ export default function Home() {
 				return { ...job, matchScore };
 			});
 
-			// Filter out jobs with 0% match, but ensure we show top few even if 0 to avoid empty UI
-			let filteredJobs = jobsWithScores.filter((job) => job.matchScore > 0);
-			if (filteredJobs.length === 0) {
-				filteredJobs = jobsWithScores.sort((a, b) => b.matchScore - a.matchScore).slice(0, 10);
-			}
+			// Filter out jobs with match score <= 50%
+			const filteredJobs = jobsWithScores.filter((job) => job.matchScore > 50);
 
 			// Store all matched jobs and reset pagination
 			setAllMatchedJobs(filteredJobs);
 			setCurrentMatchedPage(1);
 
-			// Apply default sorting (by date, newest first)
-			const sortedJobs = sortMatchedJobs(filteredJobs, 'date', 'desc');
+			// Apply search filters and default sorting (by date, newest first)
+			const searchFilteredJobs = applySearchFilters(filteredJobs);
+			const sortedJobs = sortMatchedJobs(searchFilteredJobs, 'date', 'desc');
 
 			// Calculate pagination for matched jobs
 			const startIndex = (1 - 1) * matchedJobsPerPage;
@@ -309,6 +368,28 @@ export default function Home() {
 			setIsAnalyzing(false);
 			clearInterval(progressInterval);
 		}
+	};
+
+	// Function to apply search filters to jobs
+	const applySearchFilters = (jobs: Job[]): Job[] => {
+		return jobs.filter((job) => {
+			// Filter by company name
+			if (searchCompany && !job.company.toLowerCase().includes(searchCompany.toLowerCase())) {
+				return false;
+			}
+
+			// Filter by role/title
+			if (searchRole && !job.title.toLowerCase().includes(searchRole.toLowerCase())) {
+				return false;
+			}
+
+			// Filter by location
+			if (searchLocation && !job.location.toLowerCase().includes(searchLocation.toLowerCase())) {
+				return false;
+			}
+
+			return true;
+		});
 	};
 
 	// Function to sort matched jobs
@@ -333,7 +414,8 @@ export default function Home() {
 	// Function to handle matched jobs pagination
 	const handleMatchedJobsPageChange = (page: number) => {
 		setCurrentMatchedPage(page);
-		const sortedJobs = sortMatchedJobs(allMatchedJobs, sortBy, sortOrder);
+		const filteredJobs = applySearchFilters(allMatchedJobs);
+		const sortedJobs = sortMatchedJobs(filteredJobs, sortBy, sortOrder);
 		const startIndex = (page - 1) * matchedJobsPerPage;
 		const endIndex = startIndex + matchedJobsPerPage;
 		const paginatedJobs = sortedJobs.slice(startIndex, endIndex);
@@ -369,6 +451,28 @@ export default function Home() {
 		setSortOrder('desc');
 		setAnalysisProgress(0);
 		setAnalysisError(null);
+		// Reset search filters
+		setSearchCompany('');
+		setSearchRole('');
+		setSearchLocation('');
+	};
+
+	const switchToAnalysisMode = () => {
+		setViewMode('analysis');
+		// Reset search filters when switching modes
+		setSearchCompany('');
+		setSearchRole('');
+		setSearchLocation('');
+		setCurrentPage(1);
+	};
+
+	const switchToBrowseMode = () => {
+		setViewMode('browse');
+		// Reset search filters when switching modes
+		setSearchCompany('');
+		setSearchRole('');
+		setSearchLocation('');
+		setCurrentPage(1);
 	};
 
 	return (
@@ -388,486 +492,810 @@ export default function Home() {
 
 			<main className='container mx-auto px-4 py-8 flex-1'>
 				<div className='max-w-4xl mx-auto space-y-8'>
-					{/* Hero Section */}
-					<div className='text-center space-y-4'>
-						<h2 className='text-4xl font-bold text-foreground'>Find Your Perfect Internship</h2>
-						<p className='text-xl text-muted-foreground max-w-2xl mx-auto'>
-							Upload your resume and let us analyze it to find the best matching internship opportunities from our
-							constantly updating database of {totalJobs} real internships.
-						</p>
-						{isLoadingJobs ? (
-							<div className='bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4 max-w-2xl mx-auto'>
-								<p className='text-sm text-yellow-200'>Loading internship opportunities from database...</p>
-							</div>
-						) : availableJobs.length === 0 ? (
-							<div className='bg-red-500/10 border border-red-500/20 rounded-lg p-4 max-w-2xl mx-auto'>
-								<p className='text-sm text-red-200'>
-									<strong>No internships loaded:</strong> Unable to connect to the internship database. Please ensure
-									the scraper database is available.
-								</p>
-							</div>
-						) : (
-							<div className='bg-green-500/10 border border-green-500/20 rounded-lg p-4 max-w-2xl mx-auto'>
-								<p className='text-sm text-green-200'>
-									<strong>Real Internship Data:</strong> We have {totalJobs} live internship opportunities in our
-									database. Including positions from companies like {getUniqueCompanies(availableJobs, 3).join(', ')}.
-								</p>
-							</div>
-						)}
-					</div>
-
-					{/* Upload Section */}
-					<Card className='border-2 border-dashed border-border hover:border-primary/50 transition-colors'>
-						<CardContent className='p-8'>
-							{!uploadedFile ? (
-								<div
-									{...getRootProps()}
-									className={`cursor-pointer text-center space-y-4 ${isDragActive ? 'opacity-70' : ''}`}
-								>
-									<input {...getInputProps()} />
-									<div className='mx-auto w-16 h-16 bg-muted rounded-full flex items-center justify-center'>
-										<Upload className='h-8 w-8 text-muted-foreground' />
-									</div>
-									<div>
-										<p className='text-lg font-medium text-foreground'>
-											{isDragActive ? 'Drop your resume here...' : 'Drag & drop your resume here'}
-										</p>
-										<p className='text-muted-foreground'>or click to browse files</p>
-										<p className='text-sm text-muted-foreground mt-2'>Supports PDF files only</p>
-									</div>
+					{/* Hero Section - Only show in Analysis Mode */}
+					{viewMode === 'analysis' && (
+						<div className='text-center space-y-4'>
+							<h2 className='text-4xl font-bold text-foreground'>Find Your Perfect Internship</h2>
+							<p className='text-xl text-muted-foreground max-w-2xl mx-auto'>
+								Upload your resume and let us analyze it to find the best matching internship opportunities from our
+								constantly updating database of {totalJobs} real internships.
+							</p>
+							{isLoadingJobs ? (
+								<div className='bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4 max-w-2xl mx-auto'>
+									<p className='text-sm text-yellow-200'>Loading internship opportunities from database...</p>
+								</div>
+							) : availableJobs.length === 0 ? (
+								<div className='bg-red-500/10 border border-red-500/20 rounded-lg p-4 max-w-2xl mx-auto'>
+									<p className='text-sm text-red-200'>
+										<strong>No internships loaded:</strong> Unable to connect to the internship database. Please ensure
+										the scraper database is available.
+									</p>
 								</div>
 							) : (
-								<div className='space-y-4'>
-									<div className='flex items-center justify-between'>
-										<div className='flex items-center space-x-3'>
-											<FileText className='h-8 w-8 text-primary' />
-											<div>
-												<p className='font-medium text-foreground'>{uploadedFile.name}</p>
-												<p className='text-sm text-muted-foreground'>
-													{(uploadedFile.size / 1024 / 1024).toFixed(2)} MB
-												</p>
-											</div>
-										</div>
-										<Button variant='outline' onClick={resetAnalysis}>
-											Remove
-										</Button>
-									</div>
-
-									{!isAnalyzing && !extractedKeywords && (
-										<Button onClick={analyzeResume} className='w-full'>
-											<Search className='h-4 w-4 mr-2' />
-											Analyze Resume
-										</Button>
-									)}
-
-									{isAnalyzing && (
-										<div className='space-y-2'>
-											<div className='flex items-center justify-between text-sm'>
-												<span className='text-muted-foreground'>Analyzing resume...</span>
-												<span className='text-muted-foreground'>{analysisProgress}%</span>
-											</div>
-											<Progress value={analysisProgress} className='w-full' />
-										</div>
-									)}
+								<div className='bg-green-500/10 border border-green-500/20 rounded-lg p-4 max-w-2xl mx-auto'>
+									<p className='text-sm text-green-200 mb-3'>
+										<strong>Real Internship Data:</strong> We have {totalJobs} live internship opportunities in our
+										database. Including positions from companies like {getUniqueCompanies(availableJobs, 3).join(', ')}.
+									</p>
+									<Button
+										onClick={switchToBrowseMode}
+										variant='outline'
+										size='sm'
+										className='w-full bg-green-500/20 border-green-500/30 hover:bg-green-500/30 text-green-200 hover:text-green-100'
+									>
+										<Search className='h-4 w-4 mr-2' />
+										Browse All Internships
+									</Button>
 								</div>
-							)}
-						</CardContent>
-					</Card>
-
-					{/* Error Section */}
-					{analysisError && (
-						<Card className='border-destructive/50 bg-destructive/5'>
-							<CardContent className='p-6'>
-								<div className='flex items-start space-x-3'>
-									<AlertCircle className='h-5 w-5 text-destructive mt-0.5' />
-									<div>
-										<h3 className='font-medium text-destructive mb-1'>Analysis Failed</h3>
-										<p className='text-sm text-destructive/80'>{analysisError}</p>
-									</div>
-								</div>
-							</CardContent>
-						</Card>
-					)}
-
-					{/* Keywords Section */}
-					{extractedKeywords && (
-						<Card>
-							<CardHeader>
-								<CardTitle className='flex items-center space-x-2'>
-									<Search className='h-5 w-5' />
-									<span>Extracted Keywords ({extractedKeywords.totalKeywords})</span>
-								</CardTitle>
-								<CardDescription>
-									Skills and technologies found in your resume using advanced NLP analysis
-								</CardDescription>
-							</CardHeader>
-							<CardContent className='space-y-4'>
-								{extractedKeywords.programmingLanguages.length > 0 && (
-									<div>
-										<h4 className='font-medium text-foreground mb-2'>Programming Languages</h4>
-										<div className='flex flex-wrap gap-2'>
-											{extractedKeywords.programmingLanguages.map((lang, index) => (
-												<span key={index} className='px-3 py-1 bg-blue-500/10 text-blue-400 rounded-full text-sm'>
-													{lang}
-												</span>
-											))}
-										</div>
-									</div>
-								)}
-								{extractedKeywords.frameworksAndLibraries.length > 0 && (
-									<div>
-										<h4 className='font-medium text-foreground mb-2'>Frameworks & Libraries</h4>
-										<div className='flex flex-wrap gap-2'>
-											{extractedKeywords.frameworksAndLibraries.map((framework, index) => (
-												<span key={index} className='px-3 py-1 bg-green-500/10 text-green-400 rounded-full text-sm'>
-													{framework}
-												</span>
-											))}
-										</div>
-									</div>
-								)}
-								{extractedKeywords.databases.length > 0 && (
-									<div>
-										<h4 className='font-medium text-foreground mb-2'>Databases</h4>
-										<div className='flex flex-wrap gap-2'>
-											{extractedKeywords.databases.map((db, index) => (
-												<span key={index} className='px-3 py-1 bg-orange-500/10 text-orange-400 rounded-full text-sm'>
-													{db}
-												</span>
-											))}
-										</div>
-									</div>
-								)}
-								{extractedKeywords.cloudAndInfrastructure.length > 0 && (
-									<div>
-										<h4 className='font-medium text-foreground mb-2'>Cloud & Infrastructure</h4>
-										<div className='flex flex-wrap gap-2'>
-											{extractedKeywords.cloudAndInfrastructure.map((platform, index) => (
-												<span key={index} className='px-3 py-1 bg-cyan-500/10 text-cyan-400 rounded-full text-sm'>
-													{platform}
-												</span>
-											))}
-										</div>
-									</div>
-								)}
-								{extractedKeywords.toolsAndPlatforms.length > 0 && (
-									<div>
-										<h4 className='font-medium text-foreground mb-2'>Tools & Platforms</h4>
-										<div className='flex flex-wrap gap-2'>
-											{extractedKeywords.toolsAndPlatforms.map((tool, index) => (
-												<span key={index} className='px-3 py-1 bg-purple-500/10 text-purple-400 rounded-full text-sm'>
-													{tool}
-												</span>
-											))}
-										</div>
-									</div>
-								)}
-								{extractedKeywords.mobileAndWeb.length > 0 && (
-									<div>
-										<h4 className='font-medium text-foreground mb-2'>Mobile & Web Technologies</h4>
-										<div className='flex flex-wrap gap-2'>
-											{extractedKeywords.mobileAndWeb.map((tech, index) => (
-												<span key={index} className='px-3 py-1 bg-teal-500/10 text-teal-400 rounded-full text-sm'>
-													{tech}
-												</span>
-											))}
-										</div>
-									</div>
-								)}
-								{extractedKeywords.testingAndQA.length > 0 && (
-									<div>
-										<h4 className='font-medium text-foreground mb-2'>Testing & QA</h4>
-										<div className='flex flex-wrap gap-2'>
-											{extractedKeywords.testingAndQA.map((test, index) => (
-												<span key={index} className='px-3 py-1 bg-yellow-500/10 text-yellow-400 rounded-full text-sm'>
-													{test}
-												</span>
-											))}
-										</div>
-									</div>
-								)}
-								{extractedKeywords.softSkills.length > 0 && (
-									<div>
-										<h4 className='font-medium text-foreground mb-2'>Soft Skills</h4>
-										<div className='flex flex-wrap gap-2'>
-											{extractedKeywords.softSkills.map((skill, index) => (
-												<span key={index} className='px-3 py-1 bg-emerald-500/10 text-emerald-400 rounded-full text-sm'>
-													{skill}
-												</span>
-											))}
-										</div>
-									</div>
-								)}
-								{extractedKeywords.experience.length > 0 && (
-									<div>
-										<h4 className='font-medium text-foreground mb-2'>Experience & Projects</h4>
-										<div className='flex flex-wrap gap-2'>
-											{extractedKeywords.experience.map((exp, index) => (
-												<span key={index} className='px-3 py-1 bg-violet-500/10 text-violet-400 rounded-full text-sm'>
-													{exp}
-												</span>
-											))}
-										</div>
-									</div>
-								)}
-							</CardContent>
-						</Card>
-					)}
-
-					{/* Matched Jobs Section */}
-					{extractedKeywords && !analysisError && (
-						<div className='space-y-4'>
-							{matchedJobs.length > 0 ? (
-								<>
-									<div className='space-y-4'>
-										<div className='flex items-center justify-between'>
-											<h3 className='text-2xl font-bold text-foreground'>
-												Matching Internships ({allMatchedJobs.length})
-											</h3>
-											<div className='text-sm text-muted-foreground'>
-												Showing {(currentMatchedPage - 1) * matchedJobsPerPage + 1} to{' '}
-												{Math.min(currentMatchedPage * matchedJobsPerPage, allMatchedJobs.length)} of{' '}
-												{allMatchedJobs.length} matches
-											</div>
-										</div>
-
-										{/* Filter Controls */}
-										<div className='flex items-center space-x-4'>
-											<div className='flex items-center space-x-2'>
-												<Filter className='h-4 w-4 text-muted-foreground' />
-												<span className='text-sm font-medium text-foreground'>Sort by:</span>
-											</div>
-											<div className='flex items-center space-x-2'>
-												<Button
-													variant={sortBy === 'date' ? 'default' : 'outline'}
-													size='sm'
-													onClick={() => handleSortChange('date')}
-													className='flex items-center space-x-1'
-												>
-													<Clock className='h-3 w-3' />
-													<span>Date</span>
-													{sortBy === 'date' && (
-														<ArrowUpDown className={`h-3 w-3 ${sortOrder === 'desc' ? 'rotate-180' : ''}`} />
-													)}
-												</Button>
-												<Button
-													variant={sortBy === 'match' ? 'default' : 'outline'}
-													size='sm'
-													onClick={() => handleSortChange('match')}
-													className='flex items-center space-x-1'
-												>
-													<Star className='h-3 w-3' />
-													<span>Match %</span>
-													{sortBy === 'match' && (
-														<ArrowUpDown className={`h-3 w-3 ${sortOrder === 'desc' ? 'rotate-180' : ''}`} />
-													)}
-												</Button>
-											</div>
-											<div className='text-xs text-muted-foreground'>
-												{sortBy === 'date'
-													? sortOrder === 'desc'
-														? 'Newest first'
-														: 'Oldest first'
-													: sortOrder === 'desc'
-													? 'Highest match first'
-													: 'Lowest match first'}
-											</div>
-										</div>
-									</div>
-									<div className='grid gap-4 md:grid-cols-2'>
-										{matchedJobs.map((job) => (
-											<Card key={job.id} className='hover:shadow-lg transition-shadow'>
-												<CardHeader>
-													<div className='flex items-start justify-between'>
-														<div className='space-y-1'>
-															<CardTitle className='text-lg'>{job.title}</CardTitle>
-															<CardDescription className='text-base'>{job.company}</CardDescription>
-														</div>
-														<div className='flex items-center space-x-1'>
-															<Star className='h-4 w-4 text-yellow-500 fill-current' />
-															<span className='text-sm font-medium text-foreground'>{job.matchScore}%</span>
-														</div>
-													</div>
-												</CardHeader>
-												<CardContent className='space-y-3'>
-													<div className='flex items-center space-x-4 text-sm text-muted-foreground'>
-														<div className='flex items-center space-x-1'>
-															<MapPin className='h-4 w-4' />
-															<span>{job.location}</span>
-														</div>
-														<div className='flex items-center space-x-1'>
-															<Clock className='h-4 w-4' />
-															<span>{job.season}</span>
-														</div>
-													</div>
-													<p className='text-sm text-foreground'>{job.description}</p>
-
-													{/* Sponsorship Information */}
-													<div className='flex items-center space-x-2'>
-														<span className='text-xs font-medium text-muted-foreground'>Visa Sponsorship:</span>
-														<span
-															className={`text-xs px-2 py-1 rounded-full ${
-																job.sponsorship === 'Offers Sponsorship'
-																	? 'bg-green-500/10 text-green-400'
-																	: job.sponsorship === 'Does Not Offer Sponsorship'
-																	? 'bg-red-500/10 text-red-400'
-																	: 'bg-gray-500/10 text-gray-400'
-															}`}
-														>
-															{job.sponsorship}
-														</span>
-													</div>
-
-													<div className='pt-2 space-y-2'>
-														{job.url && (
-															<Button className='w-full' onClick={() => window.open(job.url, '_blank')}>
-																Apply Now
-															</Button>
-														)}
-														<p className='text-xs text-muted-foreground text-center'>Posted: {job.datePosted}</p>
-													</div>
-												</CardContent>
-											</Card>
-										))}
-									</div>
-
-									{/* Matched Jobs Pagination */}
-									{allMatchedJobs.length > matchedJobsPerPage && (
-										<div className='flex items-center justify-center space-x-2'>
-											<Button
-												variant='outline'
-												size='sm'
-												onClick={() => handleMatchedJobsPageChange(currentMatchedPage - 1)}
-												disabled={currentMatchedPage === 1}
-											>
-												<ChevronLeft className='h-4 w-4' />
-												Previous
-											</Button>
-											<div className='flex items-center space-x-1'>
-												{Array.from(
-													{ length: Math.min(5, Math.ceil(allMatchedJobs.length / matchedJobsPerPage)) },
-													(_, i) => {
-														const pageNum = i + 1;
-														return (
-															<Button
-																key={pageNum}
-																variant={currentMatchedPage === pageNum ? 'default' : 'outline'}
-																size='sm'
-																onClick={() => handleMatchedJobsPageChange(pageNum)}
-																className='w-8 h-8 p-0'
-															>
-																{pageNum}
-															</Button>
-														);
-													}
-												)}
-												{Math.ceil(allMatchedJobs.length / matchedJobsPerPage) > 5 && (
-													<>
-														<span className='text-muted-foreground'>...</span>
-														<Button
-															variant={
-																currentMatchedPage === Math.ceil(allMatchedJobs.length / matchedJobsPerPage)
-																	? 'default'
-																	: 'outline'
-															}
-															size='sm'
-															onClick={() =>
-																handleMatchedJobsPageChange(Math.ceil(allMatchedJobs.length / matchedJobsPerPage))
-															}
-															className='w-8 h-8 p-0'
-														>
-															{Math.ceil(allMatchedJobs.length / matchedJobsPerPage)}
-														</Button>
-													</>
-												)}
-											</div>
-											<Button
-												variant='outline'
-												size='sm'
-												onClick={() => handleMatchedJobsPageChange(currentMatchedPage + 1)}
-												disabled={currentMatchedPage === Math.ceil(allMatchedJobs.length / matchedJobsPerPage)}
-											>
-												Next
-												<ChevronRight className='h-4 w-4' />
-											</Button>
-										</div>
-									)}
-								</>
-							) : (
-								<Card className='border-muted'>
-									<CardContent className='p-6 text-center'>
-										<AlertCircle className='h-12 w-12 text-muted-foreground mx-auto mb-4' />
-										<h3 className='text-lg font-medium text-foreground mb-2'>No Matching Jobs Found</h3>
-										<p className='text-muted-foreground'>
-											We couldn&apos;t find any internships that match your current skills. Consider updating your
-											resume with more relevant technical skills or experience.
-										</p>
-									</CardContent>
-								</Card>
 							)}
 						</div>
 					)}
 
-					{/* Pagination Controls */}
-					{!extractedKeywords && totalJobs > 0 && (
-						<div className='space-y-4'>
-							<div className='flex items-center justify-between'>
-								<div className='text-sm text-muted-foreground'>
-									Showing {(currentPage - 1) * 50 + 1} to {Math.min(currentPage * 50, totalJobs)} of {totalJobs}{' '}
-									internships
-								</div>
-								<div className='flex items-center space-x-2'>
-									<Button
-										variant='outline'
-										size='sm'
-										onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
-										disabled={currentPage === 1 || isLoadingJobs}
-									>
-										<ChevronLeft className='h-4 w-4' />
-										Previous
-									</Button>
-									<div className='flex items-center space-x-1'>
-										{Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-											const pageNum = i + 1;
-											return (
-												<Button
-													key={pageNum}
-													variant={currentPage === pageNum ? 'default' : 'outline'}
-													size='sm'
-													onClick={() => setCurrentPage(pageNum)}
-													disabled={isLoadingJobs}
-													className='w-8 h-8 p-0'
-												>
-													{pageNum}
+					{/* Analysis Mode Content */}
+					{viewMode === 'analysis' && (
+						<>
+							{/* Upload Section */}
+							<Card className='border-2 border-dashed border-border hover:border-primary/50 transition-colors'>
+								<CardContent className='p-8'>
+									{!uploadedFile ? (
+										<div
+											{...getRootProps()}
+											className={`cursor-pointer text-center space-y-4 ${isDragActive ? 'opacity-70' : ''}`}
+										>
+											<input {...getInputProps()} />
+											<div className='mx-auto w-16 h-16 bg-muted rounded-full flex items-center justify-center'>
+												<Upload className='h-8 w-8 text-muted-foreground' />
+											</div>
+											<div>
+												<p className='text-lg font-medium text-foreground'>
+													{isDragActive ? 'Drop your resume here...' : 'Drag & drop your resume here'}
+												</p>
+												<p className='text-muted-foreground'>or click to browse files</p>
+												<p className='text-sm text-muted-foreground mt-2'>Supports PDF files only</p>
+											</div>
+										</div>
+									) : (
+										<div className='space-y-4'>
+											<div className='flex items-center justify-between'>
+												<div className='flex items-center space-x-3'>
+													<FileText className='h-8 w-8 text-primary' />
+													<div>
+														<p className='font-medium text-foreground'>{uploadedFile.name}</p>
+														<p className='text-sm text-muted-foreground'>
+															{(uploadedFile.size / 1024 / 1024).toFixed(2)} MB
+														</p>
+													</div>
+												</div>
+												<Button variant='outline' onClick={resetAnalysis}>
+													Remove
 												</Button>
-											);
-										})}
-										{totalPages > 5 && (
-											<>
-												<span className='text-muted-foreground'>...</span>
-												<Button
-													variant={currentPage === totalPages ? 'default' : 'outline'}
-													size='sm'
-													onClick={() => setCurrentPage(totalPages)}
-													disabled={isLoadingJobs}
-													className='w-8 h-8 p-0'
-												>
-													{totalPages}
+											</div>
+
+											{!isAnalyzing && !extractedKeywords && (
+												<Button onClick={analyzeResume} className='w-full'>
+													<Search className='h-4 w-4 mr-2' />
+													Analyze Resume
 												</Button>
-											</>
+											)}
+
+											{isAnalyzing && (
+												<div className='space-y-2'>
+													<div className='flex items-center justify-between text-sm'>
+														<span className='text-muted-foreground'>Analyzing resume...</span>
+														<span className='text-muted-foreground'>{analysisProgress}%</span>
+													</div>
+													<Progress value={analysisProgress} className='w-full' />
+												</div>
+											)}
+										</div>
+									)}
+								</CardContent>
+							</Card>
+
+							{/* Error Section */}
+							{analysisError && (
+								<Card className='border-destructive/50 bg-destructive/5'>
+									<CardContent className='p-6'>
+										<div className='flex items-start space-x-3'>
+											<AlertCircle className='h-5 w-5 text-destructive mt-0.5' />
+											<div>
+												<h3 className='font-medium text-destructive mb-1'>Analysis Failed</h3>
+												<p className='text-sm text-destructive/80'>{analysisError}</p>
+											</div>
+										</div>
+									</CardContent>
+								</Card>
+							)}
+
+							{/* Keywords Section */}
+							{extractedKeywords && (
+								<Card>
+									<CardHeader>
+										<CardTitle className='flex items-center space-x-2'>
+											<Search className='h-5 w-5' />
+											<span>Extracted Keywords ({extractedKeywords.totalKeywords})</span>
+										</CardTitle>
+										<CardDescription>
+											Skills and technologies found in your resume using advanced NLP analysis
+										</CardDescription>
+									</CardHeader>
+									<CardContent className='space-y-4'>
+										{extractedKeywords.programmingLanguages.length > 0 && (
+											<div>
+												<h4 className='font-medium text-foreground mb-2'>Programming Languages</h4>
+												<div className='flex flex-wrap gap-2'>
+													{extractedKeywords.programmingLanguages.map((lang, index) => (
+														<span key={index} className='px-3 py-1 bg-blue-500/10 text-blue-400 rounded-full text-sm'>
+															{lang}
+														</span>
+													))}
+												</div>
+											</div>
 										)}
-									</div>
-									<Button
-										variant='outline'
-										size='sm'
-										onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
-										disabled={currentPage === totalPages || isLoadingJobs}
-									>
-										Next
-										<ChevronRight className='h-4 w-4' />
-									</Button>
+										{extractedKeywords.frameworksAndLibraries.length > 0 && (
+											<div>
+												<h4 className='font-medium text-foreground mb-2'>Frameworks & Libraries</h4>
+												<div className='flex flex-wrap gap-2'>
+													{extractedKeywords.frameworksAndLibraries.map((framework, index) => (
+														<span key={index} className='px-3 py-1 bg-green-500/10 text-green-400 rounded-full text-sm'>
+															{framework}
+														</span>
+													))}
+												</div>
+											</div>
+										)}
+										{extractedKeywords.databases.length > 0 && (
+											<div>
+												<h4 className='font-medium text-foreground mb-2'>Databases</h4>
+												<div className='flex flex-wrap gap-2'>
+													{extractedKeywords.databases.map((db, index) => (
+														<span
+															key={index}
+															className='px-3 py-1 bg-orange-500/10 text-orange-400 rounded-full text-sm'
+														>
+															{db}
+														</span>
+													))}
+												</div>
+											</div>
+										)}
+										{extractedKeywords.cloudAndInfrastructure.length > 0 && (
+											<div>
+												<h4 className='font-medium text-foreground mb-2'>Cloud & Infrastructure</h4>
+												<div className='flex flex-wrap gap-2'>
+													{extractedKeywords.cloudAndInfrastructure.map((platform, index) => (
+														<span key={index} className='px-3 py-1 bg-cyan-500/10 text-cyan-400 rounded-full text-sm'>
+															{platform}
+														</span>
+													))}
+												</div>
+											</div>
+										)}
+										{extractedKeywords.toolsAndPlatforms.length > 0 && (
+											<div>
+												<h4 className='font-medium text-foreground mb-2'>Tools & Platforms</h4>
+												<div className='flex flex-wrap gap-2'>
+													{extractedKeywords.toolsAndPlatforms.map((tool, index) => (
+														<span
+															key={index}
+															className='px-3 py-1 bg-purple-500/10 text-purple-400 rounded-full text-sm'
+														>
+															{tool}
+														</span>
+													))}
+												</div>
+											</div>
+										)}
+										{extractedKeywords.mobileAndWeb.length > 0 && (
+											<div>
+												<h4 className='font-medium text-foreground mb-2'>Mobile & Web Technologies</h4>
+												<div className='flex flex-wrap gap-2'>
+													{extractedKeywords.mobileAndWeb.map((tech, index) => (
+														<span key={index} className='px-3 py-1 bg-teal-500/10 text-teal-400 rounded-full text-sm'>
+															{tech}
+														</span>
+													))}
+												</div>
+											</div>
+										)}
+										{extractedKeywords.testingAndQA.length > 0 && (
+											<div>
+												<h4 className='font-medium text-foreground mb-2'>Testing & QA</h4>
+												<div className='flex flex-wrap gap-2'>
+													{extractedKeywords.testingAndQA.map((test, index) => (
+														<span
+															key={index}
+															className='px-3 py-1 bg-yellow-500/10 text-yellow-400 rounded-full text-sm'
+														>
+															{test}
+														</span>
+													))}
+												</div>
+											</div>
+										)}
+										{extractedKeywords.softSkills.length > 0 && (
+											<div>
+												<h4 className='font-medium text-foreground mb-2'>Soft Skills</h4>
+												<div className='flex flex-wrap gap-2'>
+													{extractedKeywords.softSkills.map((skill, index) => (
+														<span
+															key={index}
+															className='px-3 py-1 bg-emerald-500/10 text-emerald-400 rounded-full text-sm'
+														>
+															{skill}
+														</span>
+													))}
+												</div>
+											</div>
+										)}
+										{extractedKeywords.experience.length > 0 && (
+											<div>
+												<h4 className='font-medium text-foreground mb-2'>Experience & Projects</h4>
+												<div className='flex flex-wrap gap-2'>
+													{extractedKeywords.experience.map((exp, index) => (
+														<span
+															key={index}
+															className='px-3 py-1 bg-violet-500/10 text-violet-400 rounded-full text-sm'
+														>
+															{exp}
+														</span>
+													))}
+												</div>
+											</div>
+										)}
+									</CardContent>
+								</Card>
+							)}
+
+							{/* Matched Jobs Section */}
+							{extractedKeywords && !analysisError && (
+								<div className='space-y-4'>
+									{matchedJobs.length > 0 ? (
+										<>
+											<div className='space-y-4'>
+												<div className='flex items-center justify-between'>
+													<h3 className='text-2xl font-bold text-foreground'>
+														Matching Internships ({filteredJobsCount > 0 ? filteredJobsCount : allMatchedJobs.length})
+													</h3>
+													<div className='text-sm text-muted-foreground'>
+														Showing {(currentMatchedPage - 1) * matchedJobsPerPage + 1} to{' '}
+														{Math.min(
+															currentMatchedPage * matchedJobsPerPage,
+															filteredJobsCount > 0 ? filteredJobsCount : allMatchedJobs.length
+														)}{' '}
+														of {filteredJobsCount > 0 ? filteredJobsCount : allMatchedJobs.length} matches
+													</div>
+												</div>
+
+												{/* Search Filters */}
+												<div className='grid gap-4 md:grid-cols-3'>
+													<div className='space-y-2'>
+														<Label htmlFor='search-company' className='text-sm font-medium'>
+															Search Company
+														</Label>
+														<div className='relative'>
+															<Search className='h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground' />
+															<Input
+																id='search-company'
+																placeholder='e.g. Google, Microsoft...'
+																value={searchCompany}
+																onChange={(e) => setSearchCompany(e.target.value)}
+																className='pl-10'
+															/>
+														</div>
+													</div>
+													<div className='space-y-2'>
+														<Label htmlFor='search-role' className='text-sm font-medium'>
+															Search Role
+														</Label>
+														<div className='relative'>
+															<Search className='h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground' />
+															<Input
+																id='search-role'
+																placeholder='e.g. Software Engineer, Data Scientist...'
+																value={searchRole}
+																onChange={(e) => setSearchRole(e.target.value)}
+																className='pl-10'
+															/>
+														</div>
+													</div>
+													<div className='space-y-2'>
+														<Label htmlFor='search-location' className='text-sm font-medium'>
+															Search Location
+														</Label>
+														<div className='relative'>
+															<MapPin className='h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground' />
+															<Input
+																id='search-location'
+																placeholder='e.g. San Francisco, New York...'
+																value={searchLocation}
+																onChange={(e) => setSearchLocation(e.target.value)}
+																className='pl-10'
+															/>
+														</div>
+													</div>
+												</div>
+
+												{/* Filter Controls */}
+												<div className='flex items-center space-x-4'>
+													<div className='flex items-center space-x-2'>
+														<Filter className='h-4 w-4 text-muted-foreground' />
+														<span className='text-sm font-medium text-foreground'>Sort by:</span>
+													</div>
+													<div className='flex items-center space-x-2'>
+														<Button
+															variant={sortBy === 'date' ? 'default' : 'outline'}
+															size='sm'
+															onClick={() => handleSortChange('date')}
+															className='flex items-center space-x-1'
+														>
+															<Clock className='h-3 w-3' />
+															<span>Date</span>
+															{sortBy === 'date' && (
+																<ArrowUpDown className={`h-3 w-3 ${sortOrder === 'desc' ? 'rotate-180' : ''}`} />
+															)}
+														</Button>
+														<Button
+															variant={sortBy === 'match' ? 'default' : 'outline'}
+															size='sm'
+															onClick={() => handleSortChange('match')}
+															className='flex items-center space-x-1'
+														>
+															<Star className='h-3 w-3' />
+															<span>Match %</span>
+															{sortBy === 'match' && (
+																<ArrowUpDown className={`h-3 w-3 ${sortOrder === 'desc' ? 'rotate-180' : ''}`} />
+															)}
+														</Button>
+													</div>
+													<div className='text-xs text-muted-foreground'>
+														{sortBy === 'date'
+															? sortOrder === 'desc'
+																? 'Newest first'
+																: 'Oldest first'
+															: sortOrder === 'desc'
+															? 'Highest match first'
+															: 'Lowest match first'}
+													</div>
+												</div>
+											</div>
+											<div className='grid gap-4 md:grid-cols-2'>
+												{matchedJobs.map((job) => (
+													<Card key={job.id} className='hover:shadow-lg transition-shadow'>
+														<CardHeader>
+															<div className='flex items-start justify-between'>
+																<div className='space-y-1'>
+																	<CardTitle className='text-lg'>{job.title}</CardTitle>
+																	<CardDescription className='text-base'>{job.company}</CardDescription>
+																</div>
+																<div className='flex items-center space-x-1'>
+																	<Star className='h-4 w-4 text-yellow-500 fill-current' />
+																	<span className='text-sm font-medium text-foreground'>{job.matchScore}%</span>
+																</div>
+															</div>
+														</CardHeader>
+														<CardContent className='space-y-3'>
+															<div className='flex items-center space-x-4 text-sm text-muted-foreground'>
+																<div className='flex items-center space-x-1'>
+																	<MapPin className='h-4 w-4' />
+																	<span>{job.location}</span>
+																</div>
+																<div className='flex items-center space-x-1'>
+																	<Clock className='h-4 w-4' />
+																	<span>{job.season}</span>
+																</div>
+															</div>
+															<p className='text-sm text-foreground'>{job.description}</p>
+
+															{/* Sponsorship Information */}
+															<div className='flex items-center space-x-2'>
+																<span className='text-xs font-medium text-muted-foreground'>Visa Sponsorship:</span>
+																<span
+																	className={`text-xs px-2 py-1 rounded-full ${
+																		job.sponsorship === 'Offers Sponsorship'
+																			? 'bg-green-500/10 text-green-400'
+																			: job.sponsorship === 'Does Not Offer Sponsorship'
+																			? 'bg-red-500/10 text-red-400'
+																			: 'bg-gray-500/10 text-gray-400'
+																	}`}
+																>
+																	{job.sponsorship}
+																</span>
+															</div>
+
+															<div className='pt-2 space-y-2'>
+																{job.url && (
+																	<Button className='w-full' onClick={() => window.open(job.url, '_blank')}>
+																		Apply Now
+																	</Button>
+																)}
+																<p className='text-xs text-muted-foreground text-center'>Posted: {job.datePosted}</p>
+															</div>
+														</CardContent>
+													</Card>
+												))}
+											</div>
+
+											{/* Matched Jobs Pagination */}
+											{(filteredJobsCount > 0 ? filteredJobsCount : allMatchedJobs.length) > matchedJobsPerPage && (
+												<div className='flex items-center justify-center space-x-2'>
+													<Button
+														variant='outline'
+														size='sm'
+														onClick={() => handleMatchedJobsPageChange(currentMatchedPage - 1)}
+														disabled={currentMatchedPage === 1}
+													>
+														<ChevronLeft className='h-4 w-4' />
+														Previous
+													</Button>
+													<div className='flex items-center space-x-1'>
+														{Array.from(
+															{
+																length: Math.min(
+																	5,
+																	Math.ceil(
+																		(filteredJobsCount > 0 ? filteredJobsCount : allMatchedJobs.length) /
+																			matchedJobsPerPage
+																	)
+																),
+															},
+															(_, i) => {
+																const pageNum = i + 1;
+																return (
+																	<Button
+																		key={pageNum}
+																		variant={currentMatchedPage === pageNum ? 'default' : 'outline'}
+																		size='sm'
+																		onClick={() => handleMatchedJobsPageChange(pageNum)}
+																		className='w-8 h-8 p-0'
+																	>
+																		{pageNum}
+																	</Button>
+																);
+															}
+														)}
+														{Math.ceil(
+															(filteredJobsCount > 0 ? filteredJobsCount : allMatchedJobs.length) / matchedJobsPerPage
+														) > 5 && (
+															<>
+																<span className='text-muted-foreground'>...</span>
+																<Button
+																	variant={
+																		currentMatchedPage ===
+																		Math.ceil(
+																			(filteredJobsCount > 0 ? filteredJobsCount : allMatchedJobs.length) /
+																				matchedJobsPerPage
+																		)
+																			? 'default'
+																			: 'outline'
+																	}
+																	size='sm'
+																	onClick={() =>
+																		handleMatchedJobsPageChange(
+																			Math.ceil(
+																				(filteredJobsCount > 0 ? filteredJobsCount : allMatchedJobs.length) /
+																					matchedJobsPerPage
+																			)
+																		)
+																	}
+																	className='w-8 h-8 p-0'
+																>
+																	{Math.ceil(
+																		(filteredJobsCount > 0 ? filteredJobsCount : allMatchedJobs.length) /
+																			matchedJobsPerPage
+																	)}
+																</Button>
+															</>
+														)}
+													</div>
+													<Button
+														variant='outline'
+														size='sm'
+														onClick={() => handleMatchedJobsPageChange(currentMatchedPage + 1)}
+														disabled={
+															currentMatchedPage ===
+															Math.ceil(
+																(filteredJobsCount > 0 ? filteredJobsCount : allMatchedJobs.length) / matchedJobsPerPage
+															)
+														}
+													>
+														Next
+														<ChevronRight className='h-4 w-4' />
+													</Button>
+												</div>
+											)}
+										</>
+									) : (
+										<Card className='border-muted'>
+											<CardContent className='p-6 text-center'>
+												<AlertCircle className='h-12 w-12 text-muted-foreground mx-auto mb-4' />
+												<h3 className='text-lg font-medium text-foreground mb-2'>No Matching Jobs Found</h3>
+												<p className='text-muted-foreground'>
+													We couldn&apos;t find any internships that match your current skills. Consider updating your
+													resume with more relevant technical skills or experience.
+												</p>
+											</CardContent>
+										</Card>
+									)}
 								</div>
+							)}
+						</>
+					)}
+
+					{/* Browse All Internships Mode */}
+					{viewMode === 'browse' && (
+						<div className='space-y-8'>
+							{/* Header with Back Button */}
+							<div className='text-center space-y-4'>
+								<h2 className='text-4xl font-bold text-foreground'>Browse All Internships</h2>
+								<p className='text-xl text-muted-foreground max-w-2xl mx-auto'>
+									Explore our complete database of {totalJobs} internship opportunities without needing to upload your
+									resume.
+								</p>
+								<Button
+									onClick={switchToAnalysisMode}
+									variant='outline'
+									className='bg-primary/10 border-primary/30 hover:bg-primary/20'
+								>
+									<FileText className='h-4 w-4 mr-2' />
+									Back to Resume Analysis
+								</Button>
 							</div>
+
+							{/* Search Filters for Browse Mode */}
+							<Card>
+								<CardHeader>
+									<CardTitle className='flex items-center space-x-2'>
+										<Search className='h-5 w-5' />
+										<span>Search & Filter Internships</span>
+									</CardTitle>
+									<CardDescription>Search through all {totalJobs} internships in our database</CardDescription>
+								</CardHeader>
+								<CardContent className='space-y-4'>
+									<div className='grid gap-4 md:grid-cols-3'>
+										<div className='space-y-2'>
+											<Label htmlFor='browse-search-company' className='text-sm font-medium'>
+												Search Company
+											</Label>
+											<div className='relative'>
+												<Search className='h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground' />
+												<Input
+													id='browse-search-company'
+													placeholder='e.g. Google, Microsoft...'
+													value={searchCompany}
+													onChange={(e) => setSearchCompany(e.target.value)}
+													className='pl-10'
+												/>
+											</div>
+										</div>
+										<div className='space-y-2'>
+											<Label htmlFor='browse-search-role' className='text-sm font-medium'>
+												Search Role
+											</Label>
+											<div className='relative'>
+												<Search className='h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground' />
+												<Input
+													id='browse-search-role'
+													placeholder='e.g. Software Engineer, Data Scientist...'
+													value={searchRole}
+													onChange={(e) => setSearchRole(e.target.value)}
+													className='pl-10'
+												/>
+											</div>
+										</div>
+										<div className='space-y-2'>
+											<Label htmlFor='browse-search-location' className='text-sm font-medium'>
+												Search Location
+											</Label>
+											<div className='relative'>
+												<MapPin className='h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground' />
+												<Input
+													id='browse-search-location'
+													placeholder='e.g. San Francisco, New York...'
+													value={searchLocation}
+													onChange={(e) => setSearchLocation(e.target.value)}
+													className='pl-10'
+												/>
+											</div>
+										</div>
+									</div>
+
+									{/* Sorting Controls */}
+									<div className='flex items-center space-x-4'>
+										<div className='flex items-center space-x-2'>
+											<Filter className='h-4 w-4 text-muted-foreground' />
+											<span className='text-sm font-medium text-foreground'>Sort by:</span>
+										</div>
+										<div className='flex items-center space-x-2'>
+											<Button
+												variant={sortBy === 'date' ? 'default' : 'outline'}
+												size='sm'
+												onClick={() => handleSortChange('date')}
+												className='flex items-center space-x-1'
+											>
+												<Clock className='h-3 w-3' />
+												<span>Date</span>
+												{sortBy === 'date' && (
+													<ArrowUpDown className={`h-3 w-3 ${sortOrder === 'desc' ? 'rotate-180' : ''}`} />
+												)}
+											</Button>
+										</div>
+										<div className='text-xs text-muted-foreground'>
+											{sortOrder === 'desc' ? 'Newest first' : 'Oldest first'}
+										</div>
+									</div>
+								</CardContent>
+							</Card>
+
+							{/* Browse Results */}
+							{isLoadingJobs ? (
+								<Card>
+									<CardContent className='p-6 text-center'>
+										<div className='flex items-center justify-center space-x-2'>
+											<div className='w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin'></div>
+											<span>Loading internships...</span>
+										</div>
+									</CardContent>
+								</Card>
+							) : (
+								<>
+									{(() => {
+										const filteredJobs = applySearchFilters(availableJobs);
+										const sortedJobs =
+											sortBy === 'date'
+												? [...filteredJobs].sort((a, b) => {
+														const comparison = new Date(a.datePosted).getTime() - new Date(b.datePosted).getTime();
+														return sortOrder === 'desc' ? -comparison : comparison;
+												  })
+												: filteredJobs;
+
+										return (
+											<>
+												<div className='flex items-center justify-between'>
+													<h3 className='text-2xl font-bold text-foreground'>
+														{filteredJobs.length === availableJobs.length
+															? `All Internships (${totalJobs})`
+															: `Filtered Results (${filteredJobs.length} of ${totalJobs})`}
+													</h3>
+													<div className='text-sm text-muted-foreground'>
+														Showing {Math.min((currentPage - 1) * 50 + 1, filteredJobs.length)} to{' '}
+														{Math.min(currentPage * 50, filteredJobs.length)} of {filteredJobs.length} results
+													</div>
+												</div>
+
+												{filteredJobs.length > 0 ? (
+													<>
+														<div className='grid gap-4 md:grid-cols-2'>
+															{sortedJobs.slice((currentPage - 1) * 50, currentPage * 50).map((job) => (
+																<Card key={job.id} className='hover:shadow-lg transition-shadow'>
+																	<CardHeader>
+																		<div className='flex items-start justify-between'>
+																			<div className='space-y-1'>
+																				<CardTitle className='text-lg'>{job.title}</CardTitle>
+																				<CardDescription className='text-base'>{job.company}</CardDescription>
+																			</div>
+																		</div>
+																	</CardHeader>
+																	<CardContent className='space-y-3'>
+																		<div className='flex items-center space-x-4 text-sm text-muted-foreground'>
+																			<div className='flex items-center space-x-1'>
+																				<MapPin className='h-4 w-4' />
+																				<span>{job.location}</span>
+																			</div>
+																			<div className='flex items-center space-x-1'>
+																				<Clock className='h-4 w-4' />
+																				<span>{job.season}</span>
+																			</div>
+																		</div>
+																		<p className='text-sm text-foreground'>{job.description}</p>
+
+																		{/* Sponsorship Information */}
+																		<div className='flex items-center space-x-2'>
+																			<span className='text-xs font-medium text-muted-foreground'>
+																				Visa Sponsorship:
+																			</span>
+																			<span
+																				className={`text-xs px-2 py-1 rounded-full ${
+																					job.sponsorship === 'Offers Sponsorship'
+																						? 'bg-green-500/10 text-green-400'
+																						: job.sponsorship === 'Does Not Offer Sponsorship'
+																						? 'bg-red-500/10 text-red-400'
+																						: 'bg-gray-500/10 text-gray-400'
+																				}`}
+																			>
+																				{job.sponsorship}
+																			</span>
+																		</div>
+
+																		<div className='pt-2 space-y-2'>
+																			{job.url && (
+																				<Button className='w-full' onClick={() => window.open(job.url, '_blank')}>
+																					Apply Now
+																				</Button>
+																			)}
+																			<p className='text-xs text-muted-foreground text-center'>
+																				Posted: {job.datePosted}
+																			</p>
+																		</div>
+																	</CardContent>
+																</Card>
+															))}
+														</div>
+
+														{/* Pagination for Browse Mode */}
+														{Math.ceil(filteredJobs.length / 50) > 1 && (
+															<div className='flex items-center justify-center space-x-2'>
+																<Button
+																	variant='outline'
+																	size='sm'
+																	onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+																	disabled={currentPage === 1}
+																>
+																	<ChevronLeft className='h-4 w-4' />
+																	Previous
+																</Button>
+																<div className='flex items-center space-x-1'>
+																	{Array.from({ length: Math.min(5, Math.ceil(filteredJobs.length / 50)) }, (_, i) => {
+																		const pageNum = i + 1;
+																		return (
+																			<Button
+																				key={pageNum}
+																				variant={currentPage === pageNum ? 'default' : 'outline'}
+																				size='sm'
+																				onClick={() => setCurrentPage(pageNum)}
+																				className='w-8 h-8 p-0'
+																			>
+																				{pageNum}
+																			</Button>
+																		);
+																	})}
+																	{Math.ceil(filteredJobs.length / 50) > 5 && (
+																		<>
+																			<span className='text-muted-foreground'>...</span>
+																			<Button
+																				variant={
+																					currentPage === Math.ceil(filteredJobs.length / 50) ? 'default' : 'outline'
+																				}
+																				size='sm'
+																				onClick={() => setCurrentPage(Math.ceil(filteredJobs.length / 50))}
+																				className='w-8 h-8 p-0'
+																			>
+																				{Math.ceil(filteredJobs.length / 50)}
+																			</Button>
+																		</>
+																	)}
+																</div>
+																<Button
+																	variant='outline'
+																	size='sm'
+																	onClick={() =>
+																		setCurrentPage((prev) => Math.min(Math.ceil(filteredJobs.length / 50), prev + 1))
+																	}
+																	disabled={currentPage === Math.ceil(filteredJobs.length / 50)}
+																>
+																	Next
+																	<ChevronRight className='h-4 w-4' />
+																</Button>
+															</div>
+														)}
+													</>
+												) : (
+													<Card className='border-muted'>
+														<CardContent className='p-6 text-center'>
+															<AlertCircle className='h-12 w-12 text-muted-foreground mx-auto mb-4' />
+															<h3 className='text-lg font-medium text-foreground mb-2'>No Results Found</h3>
+															<p className='text-muted-foreground'>
+																No internships match your current search criteria. Try adjusting your filters or search
+																terms.
+															</p>
+														</CardContent>
+													</Card>
+												)}
+											</>
+										);
+									})()}
+								</>
+							)}
 						</div>
 					)}
 				</div>
