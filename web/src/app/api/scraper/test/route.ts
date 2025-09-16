@@ -48,14 +48,26 @@ export async function POST(request: NextRequest) {
 		const body = await request.json().catch(() => ({}));
 		const testType = body.testType || 'basic';
 
-		const result = {
+		const result: {
+			timestamp: string;
+			environment: {
+				nodeEnv: string | undefined;
+				hasDatabaseUrl: boolean;
+				hasCronSecret: boolean;
+			};
+			database?: {
+				connected: boolean;
+				currentTime?: string;
+				error?: string;
+			};
+		} = {
 			timestamp: new Date().toISOString(),
 			environment: {
 				nodeEnv: process.env.NODE_ENV,
 				hasDatabaseUrl: !!process.env.DATABASE_URL,
 				hasCronSecret: !!process.env.CRON_SECRET,
 			},
-		} as any;
+		};
 
 		if (testType === 'database') {
 			// Test database connection without running full scraper

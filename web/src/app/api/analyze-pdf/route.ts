@@ -489,8 +489,7 @@ export async function POST(request: NextRequest) {
 		// Convert file to buffer
 		const buffer = Buffer.from(await file.arrayBuffer());
 
-		// Dynamic imports to avoid module resolution issues
-		const natural = await import('natural');
+		// Dynamic imports available if needed for future NLP features
 
 		// Extract text from PDF using pdfjs-dist
 		const text = await extractTextFromPDFBuffer(buffer);
@@ -505,7 +504,7 @@ export async function POST(request: NextRequest) {
 		}
 
 		// Extract keywords using NLP
-		const keywords = extractKeywordsWithNLP(text, natural);
+		const keywords = extractKeywordsWithNLP(text);
 
 		return NextResponse.json({
 			success: true,
@@ -524,13 +523,7 @@ export async function POST(request: NextRequest) {
 	}
 }
 
-function extractKeywordsWithNLP(
-	text: string,
-	natural: {
-		WordTokenizer: new () => { tokenize: (text: string) => string[] | null };
-		stopwords: string[];
-	}
-) {
+function extractKeywordsWithNLP(text: string) {
 	const lowerText = text.toLowerCase();
 
 	// Note: Tokenization available if needed in the future with natural.WordTokenizer()
