@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 import { Client } from 'pg';
 
 // Simple test endpoint to verify the scraper API is working
