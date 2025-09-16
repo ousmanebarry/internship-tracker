@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import sqlite3 from 'sqlite3';
-import path from 'path';
+import { Client } from 'pg';
 
 // Interface for internship data from the database
 interface InternshipDB {
@@ -39,47 +38,14 @@ interface ProcessedInternship {
 	active: boolean;
 }
 
-function openDatabase(): Promise<sqlite3.Database> {
-	return new Promise((resolve, reject) => {
-		// Path to the SQLite database in the scraper directory
-		const dbPath = path.join(process.cwd(), '..', 'scraper', 'internships.db');
-		console.log('Database path:', dbPath);
-
-		const db = new sqlite3.Database(dbPath, sqlite3.OPEN_READONLY, (err) => {
-			if (err) {
-				console.error('Error opening database:', err);
-				reject(err);
-			} else {
-				resolve(db);
-			}
-		});
+// Database connection helper
+async function getDbClient(): Promise<Client> {
+	const client = new Client({
+		connectionString: process.env.DATABASE_URL,
+		ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
 	});
-}
-
-function queryDatabase(db: sqlite3.Database, query: string, params: unknown[] = []): Promise<unknown[]> {
-	return new Promise((resolve, reject) => {
-		db.all(query, params, (err, rows) => {
-			if (err) {
-				console.error('Database query error:', err);
-				reject(err);
-			} else {
-				resolve(rows);
-			}
-		});
-	});
-}
-
-function closeDatabase(db: sqlite3.Database): Promise<void> {
-	return new Promise((resolve, reject) => {
-		db.close((err) => {
-			if (err) {
-				console.error('Error closing database:', err);
-				reject(err);
-			} else {
-				resolve();
-			}
-		});
-	});
+	await client.connect();
+	return client;
 }
 
 function processInternshipData(dbInternship: InternshipDB): ProcessedInternship {
@@ -110,6 +76,8 @@ function processInternshipData(dbInternship: InternshipDB): ProcessedInternship 
 			? 'Offers visa sponsorship.'
 			: dbInternship.sponsorship === 'Does Not Offer Sponsorship'
 			? 'Does not offer visa sponsorship.'
+			: dbInternship.sponsorship === 'U.S. Citizenship is Required'
+			? 'U.S. citizenship is required.'
 			: ''
 	}`;
 
@@ -138,7 +106,7 @@ function processInternshipData(dbInternship: InternshipDB): ProcessedInternship 
 }
 
 export async function GET(request: NextRequest) {
-	let db: sqlite3.Database | null = null;
+	let client: Client | null = null;
 
 	try {
 		// Get query parameters
@@ -152,63 +120,75 @@ export async function GET(request: NextRequest) {
 		// Calculate offset for pagination
 		const offset = (page - 1) * limit;
 
-		// Open database connection
-		db = await openDatabase();
+		// Connect to database
+		client = await getDbClient();
 
 		// Build base query for counting total records
 		let countQuery = 'SELECT COUNT(*) as total FROM internships WHERE 1=1';
 		const countParams: unknown[] = [];
+		let paramIndex = 1;
 
 		if (season) {
-			countQuery += ' AND season = ?';
+			countQuery += ` AND season = $${paramIndex}`;
 			countParams.push(season);
+			paramIndex++;
 		}
 
 		if (sponsorship) {
-			countQuery += ' AND sponsorship = ?';
+			countQuery += ` AND sponsorship = $${paramIndex}`;
 			countParams.push(sponsorship);
+			paramIndex++;
 		}
 
 		if (active !== null) {
-			countQuery += ' AND active = ?';
-			countParams.push(active === 'true' ? 1 : 0);
+			countQuery += ` AND active = $${paramIndex}`;
+			countParams.push(active === 'true');
+			paramIndex++;
 		}
 
 		// Only count visible internships
-		countQuery += ' AND is_visible = 1';
+		countQuery += ` AND is_visible = $${paramIndex}`;
+		countParams.push(true);
 
 		// Get total count
-		const countResult = await queryDatabase(db, countQuery, countParams);
-		const totalCount = (countResult[0] as { total: number })?.total || 0;
+		const countResult = await client.query(countQuery, countParams);
+		const totalCount = parseInt(countResult.rows[0]?.total || '0');
 
 		// Build query with filters for data
 		let query = 'SELECT * FROM internships WHERE 1=1';
 		const params: unknown[] = [];
+		paramIndex = 1;
 
 		if (season) {
-			query += ' AND season = ?';
+			query += ` AND season = $${paramIndex}`;
 			params.push(season);
+			paramIndex++;
 		}
 
 		if (sponsorship) {
-			query += ' AND sponsorship = ?';
+			query += ` AND sponsorship = $${paramIndex}`;
 			params.push(sponsorship);
+			paramIndex++;
 		}
 
 		if (active !== null) {
-			query += ' AND active = ?';
-			params.push(active === 'true' ? 1 : 0);
+			query += ` AND active = $${paramIndex}`;
+			params.push(active === 'true');
+			paramIndex++;
 		}
 
 		// Only get visible internships
-		query += ' AND is_visible = 1';
+		query += ` AND is_visible = $${paramIndex}`;
+		params.push(true);
+		paramIndex++;
 
 		// Order by date posted (most recent first) and add pagination
-		query += ' ORDER BY date_posted DESC LIMIT ? OFFSET ?';
+		query += ` ORDER BY date_posted DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
 		params.push(limit, offset);
 
 		// Execute query
-		const rows = (await queryDatabase(db, query, params)) as InternshipDB[];
+		const result = await client.query(query, params);
+		const rows = result.rows as InternshipDB[];
 
 		// Process the data
 		const processedInternships: ProcessedInternship[] = rows.map(processInternshipData);
@@ -219,7 +199,7 @@ export async function GET(request: NextRequest) {
 		const hasPrevPage = page > 1;
 
 		// Close database connection
-		await closeDatabase(db);
+		await client.end();
 
 		return NextResponse.json({
 			success: true,
@@ -237,9 +217,9 @@ export async function GET(request: NextRequest) {
 		console.error('Error fetching internships:', error);
 
 		// Make sure to close the database connection even if there's an error
-		if (db) {
+		if (client) {
 			try {
-				await closeDatabase(db);
+				await client.end();
 			} catch (closeError) {
 				console.error('Error closing database after error:', closeError);
 			}
